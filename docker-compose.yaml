@@ -1,0 +1,9 @@
+services:
+  passbot:
+    build: .
+    restart: unless-stopped
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
