@@ -1,0 +1,113 @@
+name: Deploy PassBot
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run Pytest
+        env:
+          TELEGRAM_TOKEN: "123456:test_token"
+          ALLOWED_USER_IDS: "1234567890, 9876543210"
+          SECRET_KEY: "test_secret"
+        run: uv run pytest
+
+  build-and-push:
+    name: Build and Push Docker Image
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ghcr.io/shdrn2402/passbot:latest
+
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare directory on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: mkdir -p ~/passbot
+
+      - name: Copy docker-compose via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yaml"
+          target: "~/passbot"
+
+      - name: Execute remote ssh commands
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          ALLOWED_USER_IDS: ${{ secrets.ALLOWED_USER_IDS }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: ALLOWED_USER_IDS,SECRET_KEY,TELEGRAM_TOKEN
+          script: |
+            cd ~/passbot
+            
+            cat <<EOF > .env
+            TELEGRAM_TOKEN=$TELEGRAM_TOKEN
+            ALLOWED_USER_IDS=$ALLOWED_USER_IDS
+            SECRET_KEY=$SECRET_KEY
+            EOF
+            
+            docker compose pull
+            docker compose up -d --remove-orphans
+            
+            docker image prune -f  

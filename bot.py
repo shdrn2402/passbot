@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from telebot.apihelper import ApiTelegramException
 from telebot.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
-LOG_DIR = os.getenv("LOG_DIR", "/logs")
+LOG_DIR = os.getenv("LOG_DIR", "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, "bot.log")
 
