@@ -1,6 +1,6 @@
 # PassBot 🔐
 
-[![CI/CD](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yml/badge.svg)](https://github.com/shdrn2402/passbot/actions)
+[![.github/workflows/deploy.yaml](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml/badge.svg)](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml)
 
 A stateless, self-hosted Telegram bot for deterministic password generation. 
 
