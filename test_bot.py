@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import os
@@ -16,7 +17,11 @@ def test_get_suffix_deterministic(monkeypatch):
 
     message = f"{TEST_SITE}:{TEST_USER_ID}:{TEST_ITERATION}".encode("utf-8")
     secret = TEST_SECRET.encode("utf-8")
-    expected_suffix = hmac.new(secret, message, hashlib.sha256).hexdigest()[:6]
+
+    hash_bytes = hmac.new(secret, message, hashlib.sha256).digest()
+    expected_suffix = (
+        base64.urlsafe_b64encode(hash_bytes).decode("utf-8").rstrip("=")[:6]
+    )
 
     result = get_suffix(TEST_SITE, TEST_USER_ID, TEST_ITERATION)
     assert result == expected_suffix
