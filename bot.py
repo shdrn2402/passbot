@@ -1,3 +1,4 @@
+import base64
 import hashlib
 import hmac
 import logging
@@ -7,6 +8,7 @@ from logging.handlers import RotatingFileHandler
 from threading import Timer
 
 import telebot
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 from telebot.apihelper import ApiTelegramException
 from telebot.types import KeyboardButton, Message, ReplyKeyboardMarkup
@@ -49,17 +51,23 @@ if not SECRET_KEY:
     logger.critical("SECRET_KEY environment variable is not set")
     raise ValueError("SECRET_KEY is strictly required for secure password generation.")
 
+fernet_key = base64.urlsafe_b64encode(
+    hashlib.sha256(SECRET_KEY.encode("utf-8")).digest()
+)
+cipher = Fernet(fernet_key)
+
 
 def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS passwords (
-                site TEXT,
+            CREATE TABLE IF NOT EXISTS passwords_v2 (
+                site_hash TEXT,
+                site_encrypted TEXT,
                 user_id INTEGER,
                 iteration TEXT,
                 username TEXT,
-                PRIMARY KEY (site, user_id)
+                PRIMARY KEY (site_hash, user_id)
             )
         """)
     logger.info("Database initialized")
@@ -68,12 +76,22 @@ def init_db() -> None:
 bot = telebot.TeleBot(TOKEN)
 
 
+def escape_md(text: str, in_code_block: bool = False) -> str:
+    if in_code_block:
+        return text.replace("\\", "\\\\").replace("`", "\\`")
+
+    special_chars = r"_*[]()~`>#+-=|{}.!"
+    return "".join(f"\\{char}" if char in special_chars else char for char in text)
+
+
 def get_suffix(site: str, user_id: int, iteration: str = "1", length: int = 6) -> str:
     message = f"{site.strip().lower()}:{user_id}:{iteration}".encode("utf-8")
     secret = SECRET_KEY.encode("utf-8")
 
-    hash_hex = hmac.new(secret, message, hashlib.sha256).hexdigest()
-    return hash_hex[:length]
+    hash_bytes = hmac.new(secret, message, hashlib.sha256).digest()
+    suffix = base64.urlsafe_b64encode(hash_bytes).decode("utf-8").rstrip("=")
+
+    return suffix[:length]
 
 
 def delete_messages(chat_id: int, message_ids: list[int]) -> None:
@@ -95,7 +113,7 @@ def handle_start(message: Message) -> None:
     text = (
         "🔒 *Password Suffix Bot*\n\n"
         "Send: `site [iteration]`\n"
-        "Example: `yandex 2`\n\n"
+        "Example: `google 2`\n\n"
         "_Messages auto-delete after 15s_"
     )
     bot.reply_to(message, text, parse_mode="Markdown", reply_markup=markup)
@@ -108,7 +126,7 @@ def handle_list(message: Message) -> None:
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "SELECT site, user_id, iteration, username FROM passwords WHERE user_id = ? ORDER BY site",
+            "SELECT site_encrypted, user_id, iteration, username FROM passwords_v2 WHERE user_id = ?",
             (message.from_user.id,),
         )
         rows = cursor.fetchall()
@@ -126,9 +144,18 @@ def handle_list(message: Message) -> None:
         return
 
     lines = ["```text", f"{'Site':<10} | {'User':<10} | {'It':<2} | Suffix", "-" * 37]
-    for site, user_id, iteration, username in rows:
+
+    decrypted_rows = []
+    for site_encrypted, user_id, iteration, username in rows:
+        site = cipher.decrypt(site_encrypted.encode("utf-8")).decode("utf-8")
+        decrypted_rows.append((site, user_id, iteration, username))
+
+    decrypted_rows.sort(key=lambda x: x[0])
+
+    for site, user_id, iteration, username in decrypted_rows:
         suffix = get_suffix(site, user_id, iteration)
-        site_name = site[:10]
+        safe_site = escape_md(site, in_code_block=True)
+        site_name = safe_site[:10]
         user_name = (username or str(user_id))[:10]
         lines.append(f"{site_name:<10} | {user_name:<10} | {iteration:<2} | {suffix}")
     lines.append("```")
@@ -167,16 +194,27 @@ def handle_delete(message: Message) -> None:
         return
 
     site = args[1].strip().lower()
+
+    if len(site) > 50:
+        return
+
     user_id = message.from_user.id
+    site_hash = hmac.new(
+        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "DELETE FROM passwords WHERE site = ? AND user_id = ?", (site, user_id)
+            "DELETE FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
+            (site_hash, user_id),
         )
         conn.commit()
         affected = cursor.rowcount
 
-    response_text = f"Deleted `{site}`" if affected > 0 else f"Site `{site}` not found"
+    safe_site = escape_md(site, in_code_block=True)
+    response_text = (
+        f"Deleted `{safe_site}`" if affected > 0 else f"Site `{safe_site}` not found"
+    )
 
     try:
         sent_msg = bot.reply_to(message, response_text, parse_mode="MarkdownV2")
@@ -198,22 +236,31 @@ def handle_text(message: Message) -> None:
         return
 
     args = message.text.split()
-    site = args[0]
+    site = args[0].strip().lower()
     iteration = args[1] if len(args) > 1 else "1"
+
+    if len(site) > 50 or len(iteration) > 10:
+        return
 
     user_id = message.from_user.id
     username = message.from_user.first_name or message.from_user.username or "User"
 
+    site_hash = hmac.new(
+        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+    site_encrypted = cipher.encrypt(site.encode("utf-8")).decode("utf-8")
+
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
-            INSERT INTO passwords (site, user_id, iteration, username)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(site, user_id) DO UPDATE SET 
+            INSERT INTO passwords_v2 (site_hash, site_encrypted, user_id, iteration, username)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(site_hash, user_id) DO UPDATE SET 
                 iteration = excluded.iteration,
+                site_encrypted = excluded.site_encrypted,
                 username = excluded.username
         """,
-            (site, user_id, iteration, username),
+            (site_hash, site_encrypted, user_id, iteration, username),
         )
 
     suffix = get_suffix(site, user_id, iteration)
