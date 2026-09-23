@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from telebot.apihelper import ApiTelegramException
 from telebot.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
-LOG_DIR = os.getenv("LOG_DIR", "logs")
+LOG_DIR = os.getenv("LOG_DIR", "/logs")
 os.makedirs(LOG_DIR, exist_ok=True)
 LOG_FILE = os.path.join(LOG_DIR, "bot.log")
 
@@ -196,6 +196,9 @@ def handle_delete(message: Message) -> None:
     site = args[1].strip().lower()
 
     if len(site) > 50:
+        Timer(
+            15.0, delete_messages, args=[message.chat.id, [message.message_id]]
+        ).start()
         return
 
     user_id = message.from_user.id
@@ -240,6 +243,9 @@ def handle_text(message: Message) -> None:
     iteration = args[1] if len(args) > 1 else "1"
 
     if len(site) > 50 or len(iteration) > 10:
+        Timer(
+            15.0, delete_messages, args=[message.chat.id, [message.message_id]]
+        ).start()
         return
 
     user_id = message.from_user.id

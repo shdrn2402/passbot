@@ -6,19 +6,20 @@ RUN groupadd -r secret_group && useradd -r -g secret_group --no-create-home --sh
 
 WORKDIR /app
 
-RUN chown -R secret_user:secret_group /app
-
-USER secret_user
+RUN mkdir -p /logs data && chown -R secret_user:secret_group /logs
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
+RUN chown -R secret_user:secret_group /app
+
+USER secret_user
+
 COPY --chown=secret_user:secret_group "pyproject.toml" "uv.lock" ".python-version" ./
 
-RUN uv sync --frozen --no-install-project --no-cache
+RUN uv sync --frozen --no-install-project --no-dev --no-cache
 
 COPY --chown=secret_user:secret_group bot.py .
-RUN mkdir data
 
 ENTRYPOINT ["python", "bot.py"]

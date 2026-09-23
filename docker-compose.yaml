@@ -1,9 +1,15 @@
 services:
   passbot:
+    image: ghcr.io/shdrn2402/passbot:latest
     build: .
-    restart: unless-stopped
-    user: "${UID:-1000}:${GID:-1000}"
+    container_name: pass-bot
     volumes:
-      - ./data:/app/data
+      - passbot_data:/app/data
+      - passbot_logs:/logs
     env_file:
       - .env
+    restart: unless-stopped
+
+volumes:
+  passbot_data:
+  passbot_logs:
