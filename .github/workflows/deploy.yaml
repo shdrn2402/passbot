@@ -60,6 +60,8 @@ jobs:
         with:
           context: .
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: ghcr.io/shdrn2402/passbot:latest
 
   deploy:
@@ -102,9 +104,9 @@ jobs:
             cd ~/passbot
             
             cat <<EOF > .env
-            TELEGRAM_TOKEN=$TELEGRAM_TOKEN
-            ALLOWED_USER_IDS=$ALLOWED_USER_IDS
-            SECRET_KEY=$SECRET_KEY
+            TELEGRAM_TOKEN="$TELEGRAM_TOKEN"
+            ALLOWED_USER_IDS="$ALLOWED_USER_IDS"
+            SECRET_KEY="$SECRET_KEY"
             EOF
             
             docker compose pull

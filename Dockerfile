@@ -20,6 +20,6 @@ COPY --chown=secret_user:secret_group "pyproject.toml" "uv.lock" ".python-versio
 
 RUN uv sync --frozen --no-install-project --no-dev --no-cache
 
-COPY --chown=secret_user:secret_group bot.py .
+COPY --chown=secret_user:secret_group config.py handlers.py main.py utils.py .
 
-ENTRYPOINT ["python", "bot.py"]
+ENTRYPOINT ["python", "main.py"]
