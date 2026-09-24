@@ -174,7 +174,10 @@ def handle_list(message: Message) -> None:
     lines = ["```text", f"{'Site':<12} | {'T':<3} | {'It':<2} | Suffix", "-" * 33]
 
     for site, owner_id, iteration, is_shared in decrypted_rows:
-        tag = "[P]" if owner_id == req_user_id else "[S]"
+        if owner_id != req_user_id:
+            tag = "[S]"
+        else:
+            tag = "[S]" if is_shared else "[P]"
         suffix = get_suffix(site, owner_id, iteration)
         safe_site = escape_md(site, in_code_block=True)[:12]
 
@@ -246,7 +249,11 @@ def handle_get(message: Message) -> None:
     lines = ["```text", f"{'T':<3} | {'Site':<15} | {'It':<2} | Suffix", "-" * 34]
 
     for site, owner_id, iteration, is_shared in results:
-        tag = "[P]" if owner_id == req_user_id else "[S]"
+        if owner_id != req_user_id:
+            tag = "[S]"
+        else:
+            tag = "[S]" if is_shared else "[P]"
+
         suffix = get_suffix(site, owner_id, iteration)
         safe_site = escape_md(site, in_code_block=True)[:15]
 
