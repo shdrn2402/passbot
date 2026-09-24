@@ -7,6 +7,7 @@ import sqlite3
 from logging.handlers import RotatingFileHandler
 from threading import Timer
 
+import cryptography
 import telebot
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
@@ -30,10 +31,12 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-TOKEN: str | None = os.getenv("TELEGRAM_TOKEN")
-if not TOKEN:
+try:
+    TOKEN = os.environ["TELEGRAM_TOKEN"]
+except KeyError:
     logger.critical("TELEGRAM_TOKEN environment variable is not set")
     raise ValueError("TELEGRAM_TOKEN environment variable is not set")
+
 
 allowed_ids_raw: str = os.getenv("ALLOWED_USER_IDS", "")
 ALLOWED_USER_IDS = [
@@ -46,8 +49,9 @@ if not ALLOWED_USER_IDS:
     )
 
 DB_PATH: str = os.getenv("DB_PATH", "data/passwords.db")
-SECRET_KEY: str | None = os.getenv("SECRET_KEY")
-if not SECRET_KEY:
+try:
+    SECRET_KEY = os.environ["SECRET_KEY"]
+except KeyError:
     logger.critical("SECRET_KEY environment variable is not set")
     raise ValueError("SECRET_KEY is strictly required for secure password generation.")
 
@@ -74,6 +78,12 @@ def init_db() -> None:
 
 
 bot = telebot.TeleBot(TOKEN)
+
+
+def schedule_deletion(
+    chat_id: int, message_ids: list[int], delay: float = 15.0
+) -> None:
+    Timer(delay, delete_messages, args=[chat_id, message_ids]).start()
 
 
 def escape_md(text: str, in_code_block: bool = False) -> str:
@@ -134,11 +144,9 @@ def handle_list(message: Message) -> None:
     if not rows:
         try:
             sent_msg = bot.reply_to(message, "Database is empty.")
-            Timer(
-                15.0,
-                delete_messages,
-                args=[message.chat.id, [message.message_id, sent_msg.message_id]],
-            ).start()
+            schedule_deletion(
+                message.chat.id, [message.message_id, sent_msg.message_id]
+            )
         except ApiTelegramException as e:
             logger.error(f"Telegram API error sending empty DB message: {e}")
         return
@@ -147,7 +155,13 @@ def handle_list(message: Message) -> None:
 
     decrypted_rows = []
     for site_encrypted, user_id, iteration, username in rows:
-        site = cipher.decrypt(site_encrypted.encode("utf-8")).decode("utf-8")
+        try:
+            site = cipher.decrypt(site_encrypted.encode("utf-8")).decode("utf-8")
+        except cryptography.fernet.InvalidToken:
+            logger.error(
+                f"Decryption failed for user {user_id}. Data might be corrupted or key changed."
+            )
+            continue
         decrypted_rows.append((site, user_id, iteration, username))
 
     decrypted_rows.sort(key=lambda x: x[0])
@@ -164,11 +178,7 @@ def handle_list(message: Message) -> None:
 
     try:
         sent_msg = bot.reply_to(message, text, parse_mode="MarkdownV2")
-        Timer(
-            15.0,
-            delete_messages,
-            args=[message.chat.id, [message.message_id, sent_msg.message_id]],
-        ).start()
+        schedule_deletion(message.chat.id, [message.message_id, sent_msg.message_id])
     except ApiTelegramException as e:
         logger.error(f"Telegram API error sending list: {e}")
 
@@ -184,11 +194,9 @@ def handle_delete(message: Message) -> None:
             sent_msg = bot.reply_to(
                 message, "Usage: `/del site`", parse_mode="MarkdownV2"
             )
-            Timer(
-                15.0,
-                delete_messages,
-                args=[message.chat.id, [message.message_id, sent_msg.message_id]],
-            ).start()
+            schedule_deletion(
+                message.chat.id, [message.message_id, sent_msg.message_id]
+            )
         except ApiTelegramException as e:
             logger.error(f"Telegram API error sending usage: {e}")
         return
@@ -196,9 +204,7 @@ def handle_delete(message: Message) -> None:
     site = args[1].strip().lower()
 
     if len(site) > 50:
-        Timer(
-            15.0, delete_messages, args=[message.chat.id, [message.message_id]]
-        ).start()
+        schedule_deletion(message.chat.id, [message.message_id])
         return
 
     user_id = message.from_user.id
@@ -211,7 +217,6 @@ def handle_delete(message: Message) -> None:
             "DELETE FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
             (site_hash, user_id),
         )
-        conn.commit()
         affected = cursor.rowcount
 
     safe_site = escape_md(site, in_code_block=True)
@@ -221,11 +226,7 @@ def handle_delete(message: Message) -> None:
 
     try:
         sent_msg = bot.reply_to(message, response_text, parse_mode="MarkdownV2")
-        Timer(
-            15.0,
-            delete_messages,
-            args=[message.chat.id, [message.message_id, sent_msg.message_id]],
-        ).start()
+        schedule_deletion(message.chat.id, [message.message_id, sent_msg.message_id])
     except ApiTelegramException as e:
         logger.error(f"Telegram API error sending delete response: {e}")
 
@@ -243,9 +244,7 @@ def handle_text(message: Message) -> None:
     iteration = args[1] if len(args) > 1 else "1"
 
     if len(site) > 50 or len(iteration) > 10:
-        Timer(
-            15.0, delete_messages, args=[message.chat.id, [message.message_id]]
-        ).start()
+        schedule_deletion(message.chat.id, [message.message_id])
         return
 
     user_id = message.from_user.id
@@ -254,30 +253,37 @@ def handle_text(message: Message) -> None:
     site_hash = hmac.new(
         SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
     ).hexdigest()
-    site_encrypted = cipher.encrypt(site.encode("utf-8")).decode("utf-8")
 
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(
-            """
-            INSERT INTO passwords_v2 (site_hash, site_encrypted, user_id, iteration, username)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(site_hash, user_id) DO UPDATE SET 
-                iteration = excluded.iteration,
-                site_encrypted = excluded.site_encrypted,
-                username = excluded.username
-        """,
-            (site_hash, site_encrypted, user_id, iteration, username),
+        cursor = conn.execute(
+            "SELECT 1 FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
+            (site_hash, user_id),
         )
+
+        if cursor.fetchone():
+            conn.execute(
+                """
+                UPDATE passwords_v2 
+                SET iteration = ?, username = ? 
+                WHERE site_hash = ? AND user_id = ?
+                """,
+                (iteration, username, site_hash, user_id),
+            )
+        else:
+            site_encrypted = cipher.encrypt(site.encode("utf-8")).decode("utf-8")
+            conn.execute(
+                """
+                INSERT INTO passwords_v2 (site_hash, site_encrypted, user_id, iteration, username)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (site_hash, site_encrypted, user_id, iteration, username),
+            )
 
     suffix = get_suffix(site, user_id, iteration)
 
     try:
         sent_msg = bot.reply_to(message, f"`{suffix}`", parse_mode="MarkdownV2")
-        Timer(
-            15.0,
-            delete_messages,
-            args=[message.chat.id, [message.message_id, sent_msg.message_id]],
-        ).start()
+        schedule_deletion(message.chat.id, [message.message_id, sent_msg.message_id])
     except ApiTelegramException as e:
         logger.error(f"Telegram API error sending message: {e}")
 
