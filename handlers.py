@@ -5,9 +5,15 @@ import sqlite3
 
 import cryptography
 from telebot.apihelper import ApiTelegramException
-from telebot.types import Message, ReplyKeyboardRemove
+from telebot.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardRemove,
+)
 
-from bot import ALLOWED_USER_IDS, bot
+from config import ALLOWED_USER_IDS, bot
 from utils import (
     DB_PATH,
     SECRET_KEY,
@@ -19,6 +25,21 @@ from utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_site_keyboard(site: str, is_shared: bool) -> InlineKeyboardMarkup:
+    markup = InlineKeyboardMarkup()
+
+    btn_next = InlineKeyboardButton("🔄 Next", callback_data=f"next:{site}")
+
+    share_text = "🔒 Unshare" if is_shared else "👨‍👩‍👧 Share"
+    share_action = "unshare" if is_shared else "share"
+    btn_share = InlineKeyboardButton(share_text, callback_data=f"{share_action}:{site}")
+
+    btn_del = InlineKeyboardButton("🗑 Del", callback_data=f"del:{site}")
+
+    markup.row(btn_next, btn_share, btn_del)
+    return markup
 
 
 def process_share_command(message: Message, is_shared: int) -> None:
@@ -72,6 +93,7 @@ def process_share_command(message: Message, is_shared: int) -> None:
 
 @bot.message_handler(commands=["start"])
 def handle_start(message: Message) -> None:
+
     if message.from_user.id not in ALLOWED_USER_IDS:
         return
 
@@ -415,35 +437,134 @@ def handle_text(message: Message) -> None:
 
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "SELECT 1 FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
+            "SELECT is_shared FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
             (site_hash, user_id),
         )
+        row = cursor.fetchone()
 
-        if cursor.fetchone():
+        if row:
+            is_shared = bool(row[0])
             conn.execute(
                 """
-                UPDATE passwords_v2 
-                SET iteration = ?, username = ? 
-                WHERE site_hash = ? AND user_id = ?
-                """,
+                    UPDATE passwords_v2 
+                    SET iteration = ?, username = ? 
+                    WHERE site_hash = ? AND user_id = ?
+                    """,
                 (iteration, username, site_hash, user_id),
             )
         else:
-            site_encrypted = cipher.encrypt(site.encode("utf-8")).decode("utf-8")
+            is_shared = False
+            site_encrypted = cipher.encrypt(site.encode("utf-8")).decode("utf-8")  # noqa
             conn.execute(
                 """
-                INSERT INTO passwords_v2 (site_hash, site_encrypted, user_id, iteration, username)
-                VALUES (?, ?, ?, ?, ?)
-                """,
+                    INSERT INTO passwords_v2 (site_hash, site_encrypted, user_id, iteration, username)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
                 (site_hash, site_encrypted, user_id, iteration, username),
             )
 
     suffix = get_suffix(site, user_id, iteration)
+    markup = get_site_keyboard(site, is_shared)
 
     try:
-        sent_msg = bot.reply_to(message, f"`{suffix}`", parse_mode="MarkdownV2")
+        sent_msg = bot.reply_to(
+            message, f"`{suffix}`", parse_mode="MarkdownV2", reply_markup=markup
+        )
         schedule_deletion(
             bot, message.chat.id, [message.message_id, sent_msg.message_id]
         )
     except ApiTelegramException as e:
         logger.error(f"Telegram API error sending message: {e}")
+
+
+@bot.callback_query_handler(
+    func=lambda call: call.data.startswith(("next:", "share:", "unshare:", "del:"))
+)
+def handle_callbacks(call: CallbackQuery) -> None:
+    if call.from_user.id not in ALLOWED_USER_IDS:
+        return
+
+    action, site = call.data.split(":", 1)
+    user_id = call.from_user.id
+    site_hash = hmac.new(
+        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            if action == "next":
+                cursor = conn.execute(
+                    "SELECT iteration, is_shared FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
+                    (site_hash, user_id),
+                )
+                row = cursor.fetchone()
+
+                if not row:
+                    bot.answer_callback_query(
+                        call.id, "Site not found", show_alert=True
+                    )
+                    return
+
+                current_iteration, is_shared = row
+                try:
+                    next_iteration = str(int(current_iteration) + 1)
+                except ValueError:
+                    bot.answer_callback_query(
+                        call.id, "Error: Invalid iteration format", show_alert=True
+                    )
+                    return
+
+                conn.execute(
+                    "UPDATE passwords_v2 SET iteration = ? WHERE site_hash = ? AND user_id = ?",
+                    (next_iteration, site_hash, user_id),
+                )
+
+                suffix = get_suffix(site, user_id, next_iteration)
+                markup = get_site_keyboard(site, bool(is_shared))
+
+                bot.edit_message_text(
+                    f"`{suffix}`",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    parse_mode="MarkdownV2",
+                    reply_markup=markup,
+                )
+                bot.answer_callback_query(
+                    call.id, f"Iteration incremented to {next_iteration}"
+                )
+
+            elif action in ("share", "unshare"):
+                is_shared_new = 1 if action == "share" else 0
+                conn.execute(
+                    "UPDATE passwords_v2 SET is_shared = ? WHERE site_hash = ? AND user_id = ?",
+                    (is_shared_new, site_hash, user_id),
+                )
+
+                cursor = conn.execute(
+                    "SELECT iteration FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
+                    (site_hash, user_id),
+                )
+                row = cursor.fetchone()
+
+                if row:
+                    suffix = get_suffix(site, user_id, row[0])
+                    markup = get_site_keyboard(site, bool(is_shared_new))
+                    bot.edit_message_reply_markup(
+                        call.message.chat.id,
+                        call.message.message_id,
+                        reply_markup=markup,
+                    )
+
+                status_text = "Shared with family" if is_shared_new else "Made private"
+                bot.answer_callback_query(call.id, status_text)
+
+            elif action == "del":
+                conn.execute(
+                    "DELETE FROM passwords_v2 WHERE site_hash = ? AND user_id = ?",
+                    (site_hash, user_id),
+                )
+                bot.delete_message(call.message.chat.id, call.message.message_id)
+                bot.answer_callback_query(call.id, "Site deleted successfully")
+
+    except ApiTelegramException as e:
+        logger.error(f"Telegram API error in callback {action}: {e}")
