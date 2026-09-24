@@ -2,7 +2,7 @@
 
 [![.github/workflows/deploy.yaml](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml/badge.svg)](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml)
 
-A stateless, self-hosted Telegram bot for deterministic password generation. 
+A stateless, self-hosted Telegram bot for deterministic password generation.
 
 ## 🧠 Core Concept: Suffix Management, Not Password Storage
 
@@ -14,46 +14,49 @@ PassBot is **not** a traditional password generator. It is designed to generate 
 Your final password for any website is constructed in your mind at the moment of login: `[Your Master Base] + [Bot's Suffix]`.
 
 **Solving the Password Rotation Problem:**
-When a service forces a password change or experiences a breach, you do not need to change your Master Base or resort to weak practices like appending `1`, `2`, or `3` to your password. Instead, you simply request the next iteration for that site from the bot (e.g., `google 2`). The bot generates a completely new, secure suffix while your Master Base remains secure and mathematically impossible to compromise via the bot's database.
+When a service forces a password change or experiences a breach, you do not need to change your Master Base or resort to weak practices like appending `1`, `2`, or `3` to your password. Instead, you simply request the next iteration for that site via the inline `🔄 Next` button. The bot generates a completely new, secure suffix while your Master Base remains secure and mathematically impossible to compromise via the bot's database.
 
 ## 🛡️ Architecture & Security
 
-* **Stateless Generation:** Passwords are mathematically derived using the user ID, site name, iteration counter, and a master secret. 
-* **Zero-Knowledge Database:** The SQLite database stores only `(user_id, site, iteration)`. Even if the database is fully compromised, no passwords can be extracted.
+* **Stateless Generation:** Passwords are mathematically derived using the user ID, site name, iteration counter, and a master secret.
+* **Zero-Knowledge Database:** The SQLite database stores only `(user_id, encrypted_site_name, iteration, is_shared)`. Site names are encrypted at rest using Fernet symmetric encryption. Even if the database is fully compromised, neither passwords nor site names can be extracted.
 * **Isolated Access:** Built for personal use. The bot strictly responds only to the `ALLOWED_USER_IDS` specified in the environment variables.
 
 ## 🚀 Features
 
+* **Interactive Inline UI:** Messages with generated passwords contain inline buttons (`🔄 Next`, `Share/Unshare`, `🗑 Del`) for instant database updates.
+* **Auto-Deleting Messages:** Sensitive messages with passwords automatically delete themselves after a short timeout to prevent screen snooping.
 * `/list` — Display all registered services (fast self-deleting message for security).
 * `/get [site]` — Retrieve a password for a specific service with partial match support.
-* `/next [site]` — Increment the iteration counter for a site to instantly generate a new password (e.g., if a password needs to be changed).
-* `/backup` — Export personal metadata configurations securely to chat.
+* `/share [site]` & `/unshare [site]` — Manage family sharing for specific services.
+* `/del [site]` — Completely erase a service from the database.
 * `/help` — Command reference.
 
 ## 🛠️ Tech Stack
 
-* **Language:** Python 3
+* **Language:** Python 3.13
 * **Bot API:** `pyTelegramBotAPI` (telebot)
 * **Database:** SQLite
-* **Infrastructure:** Docker, Docker Compose
-* **CI/CD:** GitHub Actions (Automated testing and SSH deployment)
+* **Cryptography:** `cryptography` (Fernet), `hashlib`, `hmac`
+* **Infrastructure:** `uv` (dependency management), Docker, Docker Compose
+* **Testing & CI/CD:** `pytest`, GitHub Actions (Automated testing and SSH deployment)
 
 ## ⚙️ Quick Start
 
 1. **Clone the repository:**
    ```bash
-    git clone https://github.com/shdrn2402/passbot.git
-    cd passbot
+   git clone [https://github.com/shdrn2402/passbot.git](https://github.com/shdrn2402/passbot.git)
+   cd passbot
    ```
 
-2. **Configure environment:** Create a .env file in the root directory:
-    ```.env
-    TELEGRAM_TOKEN=your_bot_token_here
-    ALLOWED_USER_IDS=123456789,987654321
-    SECRET_KEY=your_random_master_secret
-    ```
+2. **Configure environment:** Create a `.env` file in the root directory:
+   ```env
+   TELEGRAM_TOKEN=your_bot_token_here
+   ALLOWED_USER_IDS=123456789,987654321
+   SECRET_KEY=your_random_master_secret
+   ```
 
-3. Run with Docker Compose:
-```Bash
-docker compose up -d --build
-```
+3. **Run with Docker Compose:**
+   ```bash
+   docker compose up -d --build
+   ```
