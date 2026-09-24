@@ -14,3 +14,17 @@ wheels/
 data/
 logs/
 *.log
+
+# Pytest & Coverage
+.pytest_cache/
+test_passwords.sqlite3
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
