@@ -1,6 +1,6 @@
 # PassBot 🔐
 
-[![.github/workflows/deploy.yaml](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml/badge.svg)](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml)
+[![CI/CD Pipeline](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml/badge.svg)](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml)
 
 A stateless, self-hosted Telegram bot for deterministic password generation.
 
@@ -48,7 +48,7 @@ When a service forces a password change or experiences a breach, you do not need
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/shdrn2402/passbot.git](https://github.com/shdrn2402/passbot.git)
+   git clone https://github.com/shdrn2402/passbot.git
    cd passbot
    ```
 
