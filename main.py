@@ -2,13 +2,11 @@ import logging
 
 from telebot.types import BotCommand
 
-# Import initialization logic and the bot instance
 from config import bot
 from utils import init_db
 
 logger = logging.getLogger(__name__)
 
-# Import handlers to register them with the bot instance
 import handlers  # noqa: F401
 
 if __name__ == "__main__":
@@ -16,7 +14,14 @@ if __name__ == "__main__":
 
     bot.set_my_commands(
         [
+            BotCommand("find", "Search for a specific site"),
+            BotCommand("get", "Get suffix for exact site"),
+            BotCommand("info", "Show detailed site info"),
             BotCommand("list", "Show all passwords"),
+            BotCommand("shared", "List your shared services"),
+            BotCommand("share", "Make your site available to family"),
+            BotCommand("unshare", "Make your site private again"),
+            BotCommand("del", "Delete a site completely"),
             BotCommand("help", "Show available commands"),
         ]
     )
