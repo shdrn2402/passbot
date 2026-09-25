@@ -1,21 +1,27 @@
-import hashlib
-import hmac
 import os
 import sqlite3
 from unittest.mock import MagicMock
 
 import pytest
-from telebot.types import Chat, Message, User
+from telebot.types import CallbackQuery, Message, User
 
-import handlers
-from utils import SECRET_KEY, cipher
-
-# Use a temporary local file instead of :memory: to persist data between connections
+# Set env vars before importing internal modules to prevent init errors
 TEST_DB_PATH = "test_passwords.sqlite3"
 os.environ["SECRET_KEY"] = "test_super_secret_key_1234567890"
 os.environ["DB_PATH"] = TEST_DB_PATH
+os.environ["TELEGRAM_TOKEN"] = "123456:dummy_test_token"
 
-from utils import DB_PATH, escape_md, get_suffix, init_db, set_shared_status
+import handlers
+from config import AuthMiddleware
+from utils import (
+    DB_PATH,
+    cipher,
+    escape_md,
+    get_site_hash,
+    get_suffix,
+    init_db,
+    set_shared_status,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -59,7 +65,7 @@ def test_get_suffix_behavior():
 
 def test_set_shared_status_integration():
     """Integration test: logic interaction with the SQLite database."""
-    site_hash = "fake_hash_123"
+    site_hash = get_site_hash("fake_site")
     user_id = 999
 
     with sqlite3.connect(DB_PATH) as conn:
@@ -101,31 +107,65 @@ def test_fernet_encryption_roundtrip():
     assert decrypted == original_site
 
 
-def test_unauthorized_user_access_denied(monkeypatch):
-    """Ensure handlers exit early for users not in ALLOWED_USER_IDS."""
-    mock_reply = MagicMock()
-    monkeypatch.setattr("handlers.bot.reply_to", mock_reply)
-    monkeypatch.setattr("handlers.ALLOWED_USER_IDS", [111, 222])
+def test_auth_middleware_blocks_unauthorized(monkeypatch):
+    """Ensure AuthMiddleware intercepts and cancels updates for unauthorized users."""
+    monkeypatch.setattr("config.ALLOWED_USER_IDS", [111, 222])
+    middleware = AuthMiddleware()
 
     message = MagicMock()
+
+    # Test unauthorized
     message.from_user.id = 999
-    message.text = "/list"
+    result = middleware.pre_process(message, {})
+    assert result is not None
+    assert type(result).__name__ == "CancelUpdate"
+
+    # Test authorized
+    message.from_user.id = 111
+    result = middleware.pre_process(message, {})
+    assert result is None
+
+
+def test_list_pagination(monkeypatch):
+    """Ensure /list breaks output into multiple messages if rows exceed chunk size."""
+    mock_bot = MagicMock()
+    monkeypatch.setattr("handlers.bot", mock_bot)
+
+    req_user_id = 999
+
+    with sqlite3.connect(DB_PATH) as conn:
+        for i in range(50):
+            site = f"site_{i:02d}"
+            site_hash = get_site_hash(site)
+            site_enc = cipher.encrypt(site.encode("utf-8")).decode("utf-8")
+            conn.execute(
+                "INSERT INTO passwords_v2 (site_hash, site_encrypted, user_id, iteration, is_shared) VALUES (?, ?, ?, ?, ?)",
+                (site_hash, site_enc, req_user_id, "1", 0),
+            )
+
+    message = MagicMock()
+    message.from_user.id = req_user_id
+    message.chat.id = 111
+    message.message_id = 222
 
     handlers.handle_list(message)
 
-    # Bot should ignore the request and never call reply_to
-    mock_reply.assert_not_called()
+    # Default chunk size is 40. 50 items should produce 2 calls.
+    assert mock_bot.reply_to.call_count == 2
+
+    for call_args in mock_bot.reply_to.call_args_list:
+        text = call_args[0][1]
+        assert text.startswith("```text\n")
+        assert text.endswith("```")
 
 
 def test_callback_next_action(monkeypatch):
+    """Ensure the 'next' inline button increments the iteration correctly."""
     mock_bot = MagicMock()
     monkeypatch.setattr("handlers.bot", mock_bot)
-    monkeypatch.setattr("handlers.ALLOWED_USER_IDS", [999])
 
     site = "cb_test_next"
-    site_hash = hmac.new(
-        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    site_hash = get_site_hash(site)
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -152,18 +192,22 @@ def test_callback_next_action(monkeypatch):
         assert cursor.fetchone()[0] == "2"
 
     mock_bot.edit_message_text.assert_called_once()
+
+    # Verify the code block formatting
+    args, _ = mock_bot.edit_message_text.call_args
+    assert args[0].startswith("```\n")
+    assert args[0].endswith("\n```")
+
     mock_bot.answer_callback_query.assert_called_once()
 
 
 def test_callback_del_action(monkeypatch):
+    """Ensure the 'del' inline button deletes the target site."""
     mock_bot = MagicMock()
     monkeypatch.setattr("handlers.bot", mock_bot)
-    monkeypatch.setattr("handlers.ALLOWED_USER_IDS", [999])
 
     site = "cb_test_del"
-    site_hash = hmac.new(
-        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    site_hash = get_site_hash(site)
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
@@ -194,14 +238,12 @@ def test_callback_del_action(monkeypatch):
 
 
 def test_callback_share_action(monkeypatch):
+    """Ensure the 'share' inline button toggles the shared state."""
     mock_bot = MagicMock()
     monkeypatch.setattr("handlers.bot", mock_bot)
-    monkeypatch.setattr("handlers.ALLOWED_USER_IDS", [999])
 
     site = "cb_test_share"
-    site_hash = hmac.new(
-        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    site_hash = get_site_hash(site)
 
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
