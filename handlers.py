@@ -114,7 +114,7 @@ def handle_help(message: Message) -> None:
         "*/get \\[site\\]* \\- Get suffix for exact site\n"
         "*/find \\[query\\]* \\- Search for a specific site\n"
         "*/info \\[site\\]* \\- Show detailed site info\n"
-        "*/share \\[site\\]* \\- Make your site available to family\n"
+        "*/share \\[site\\]* \\- Make your site available to shared\n"
         "*/unshare \\[site\\]* \\- Make your site private again\n"
         "*/del \\[site\\]* \\- Delete a site completely\n\n"
         "_Message auto\\-deletes in 30s_"
@@ -164,9 +164,9 @@ def handle_list(message: Message) -> None:
 
     for site, owner_id, is_shared in decrypted_rows:
         if owner_id != req_user_id:
-            tag = "[Fam]"
+            tag = "shared"
         else:
-            tag = "[Fam]" if is_shared else "[Priv]"
+            tag = "shared" if is_shared else "private"
 
         safe_site = escape_md(site, in_code_block=True)[:15]
         lines.append(f"{safe_site:<15} | {tag}")
@@ -348,7 +348,7 @@ def handle_get(message: Message) -> None:
 
     suffix = get_suffix(site, owner_id, iteration)
 
-    # Do not allow modifying family member's records, but show buttons for own
+    # Do not allow modifying shared member's records, but show buttons for own
     is_owner = owner_id == req_user_id
     markup = get_site_keyboard(site, bool(is_shared)) if is_owner else None
 
@@ -675,7 +675,7 @@ def handle_callbacks(call: CallbackQuery) -> None:
                         reply_markup=markup,
                     )
 
-                status_text = "Shared with family" if is_shared_new else "Made private"
+                status_text = "Shared with shared" if is_shared_new else "Made private"
                 bot.answer_callback_query(call.id, status_text)
 
             elif action == "del":
