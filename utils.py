@@ -4,6 +4,7 @@ import hmac
 import logging
 import os
 import sqlite3
+import time
 from logging.handlers import RotatingFileHandler
 from threading import Timer
 
@@ -55,6 +56,7 @@ def init_db() -> None:
                 iteration TEXT,
                 username TEXT,
                 is_shared INTEGER DEFAULT 0,
+                updated_at INTEGER,
                 PRIMARY KEY (site_hash, user_id)
             )
         """)
@@ -68,11 +70,38 @@ def init_db() -> None:
             )
             logger.info("Database migrated: added is_shared column")
 
+        if "updated_at" not in columns:
+            conn.execute(
+                "ALTER TABLE passwords_v2 ADD COLUMN updated_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))"
+            )
+            logger.info("Database migrated: added updated_at column")
+
     logger.info("Database initialized")
 
 
+def get_site_hash(site: str) -> str:
+    return hmac.new(
+        SECRET_KEY.encode("utf-8"), site.encode("utf-8"), hashlib.sha256
+    ).hexdigest()
+
+
+def format_relative_time(timestamp: int | None) -> str:
+    if not timestamp:
+        return "Unknown"
+
+    diff = int(time.time()) - timestamp
+    days = diff // 86400
+
+    if days == 0:
+        return "Today"
+    if days == 1:
+        return "1 day ago"
+
+    return f"{days} days ago"
+
+
 def get_suffix(site: str, user_id: int, iteration: str = "1", length: int = 6) -> str:
-    message = f"{site.strip().lower()}:{user_id}:{iteration}".encode("utf-8")  # noqa
+    message = f"{site.strip().lower()}:{user_id}:{iteration}".encode("utf-8")
     secret = SECRET_KEY.encode("utf-8")
 
     hash_bytes = hmac.new(secret, message, hashlib.sha256).digest()
@@ -92,7 +121,7 @@ def escape_md(text: str, in_code_block: bool = False) -> str:
 def set_shared_status(site_hash: str, user_id: int, is_shared: int) -> int:
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.execute(
-            "UPDATE passwords_v2 SET is_shared = ? WHERE site_hash = ? AND user_id = ?",
+            "UPDATE passwords_v2 SET is_shared = ?, updated_at = CAST(strftime('%s', 'now') AS INTEGER) WHERE site_hash = ? AND user_id = ?",
             (is_shared, site_hash, user_id),
         )
         return cursor.rowcount
