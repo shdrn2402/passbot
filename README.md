@@ -19,18 +19,21 @@ When a service forces a password change or experiences a breach, you do not need
 ## 🛡️ Architecture & Security
 
 * **Stateless Generation:** Passwords are mathematically derived using the user ID, site name, iteration counter, and a master secret.
-* **Zero-Knowledge Database:** The SQLite database stores only `(user_id, encrypted_site_name, iteration, is_shared)`. Site names are encrypted at rest using Fernet symmetric encryption. Even if the database is fully compromised, neither passwords nor site names can be extracted.
-* **Isolated Access:** Built for personal use. The bot strictly responds only to the `ALLOWED_USER_IDS` specified in the environment variables.
+* **Zero-Knowledge Database:** The SQLite database stores only `(site_hash, encrypted_site_name, user_id, iteration, is_shared, updated_at)`. Site names are encrypted at rest using Fernet symmetric encryption. Even if the database is fully compromised, neither passwords nor site names can be extracted.
+* **Isolated Access:** Built for personal use. The bot utilizes a centralized `AuthMiddleware` to strictly intercept and block any requests from users not specified in the `ALLOWED_USER_IDS` environment variable.
 
 ## 🚀 Features
 
 * **Interactive Inline UI:** Messages with generated passwords contain inline buttons (`🔄 Next`, `Share/Unshare`, `🗑 Del`) for instant database updates.
 * **Auto-Deleting Messages:** Sensitive messages with passwords automatically delete themselves after a short timeout to prevent screen snooping.
-* `/list` — Display all registered services (fast self-deleting message for security).
-* `/get [site]` — Retrieve a password for a specific service with partial match support.
-* `/share [site]` & `/unshare [site]` — Manage family sharing for specific services.
-* `/del [site]` — Completely erase a service from the database.
-* `/help` — Command reference.
+* **/list** — Display all registered personal and shared services (paginated automatically to avoid API limits).
+* **/shared** — List only the services you are currently sharing with your family.
+* **/find [query]** — Search for a specific service using a partial match and select it via inline buttons.
+* **/get [site]** — Retrieve the password suffix for an exact site match.
+* **/info [site]** — Show detailed metadata for a site, including its current iteration, shared status, and when it was last updated.
+* **/share [site]** & **/unshare [site]** — Manage family sharing for specific services.
+* **/del [site]** — Completely erase a service from the database.
+* **/help** — Command reference.
 
 ## 🛠️ Tech Stack
 
