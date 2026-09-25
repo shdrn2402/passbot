@@ -72,7 +72,7 @@ def init_db() -> None:
 
         if "updated_at" not in columns:
             conn.execute(
-                "ALTER TABLE passwords_v2 ADD COLUMN updated_at INTEGER DEFAULT (CAST(strftime('%s', 'now') AS INTEGER))"
+                "ALTER TABLE passwords_v2 ADD COLUMN updated_at INTEGER DEFAULT 0"
             )
             logger.info("Database migrated: added updated_at column")
 

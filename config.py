@@ -44,5 +44,5 @@ class AuthMiddleware(BaseMiddleware):
         pass
 
 
-bot = telebot.TeleBot(TOKEN)
+bot = telebot.TeleBot(TOKEN, use_class_middlewares=True)
 bot.setup_middleware(AuthMiddleware())
