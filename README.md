@@ -1,6 +1,11 @@
 # PassBot 🔐
 
 [![CI/CD Pipeline](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml/badge.svg)](https://github.com/shdrn2402/passbot/actions/workflows/deploy.yaml)
+[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![Package Manager: uv](https://img.shields.io/badge/package--manager-uv-brightgreen)](https://docs.astral.sh/uv/)
+[![Database: SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](https://www.sqlite.org/)
+[![Container: Docker](https://img.shields.io/badge/Docker-Enabled-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Security: Zero--Knowledge](https://img.shields.io/badge/Security-Zero--Knowledge-critical)](#-architecture--security)
 
 A stateless, self-hosted Telegram bot for deterministic password generation.
 
